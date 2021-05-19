@@ -1,0 +1,5 @@
+book_filename: "01-trabalho-pl"
+language:
+  ui:
+    chapter_name: "Tema "
+delete_merged_file: true

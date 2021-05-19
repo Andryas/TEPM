@@ -1,0 +1,279 @@
+# Códigos
+
+Neste apêndice é disponibilizado os códigos para obtenção dos dados. 
+A função **get_cities** coleta todas as cidades e seus respectivos estados do Brasil.
+A função **get_distance_matrix** faz todas as combinações dois à dois e calcula a distância e
+a duração do percurso atráves da API do Google Maps. 
+
+colocar os pacotes necessários aqui....
+
+Abaixo tem-se os códigos e em seguida alguns exemplos práticos.
+
+```{r, eval = FALSE}
+#' @title Todos munícipios do Brasil
+#' 
+#' Esta função coleta todos os munícipios e seus respectivos estados no Brasil
+#' 
+#' @examples
+#' 
+#' x <- get_cities()
+#' head(x)
+#' 
+#' x %>% 
+#'  filter(uf == "Paraná")
+#' 
+#' x %>% 
+#'  filter(uf == "Paraná" & cidade == "Curitiba")
+#' 
+#' @export
+get_cities <- function() {
+    path <- "https://servicodados.ibge.gov.br/api/v1/localidades/estados"
+    tb_uf <- jsonlite::read_json(path)
+    tb_uf <- purrr::map(tb_uf, function(.x) {
+        regiao <- tibble::as_tibble(.x[["regiao"]])
+        names(regiao) <- stringr::str_c("regiao_", names(regiao))
+        dplyr::bind_cols(tibble::as_tibble(.x[1:3]), regiao)
+    }) %>%
+        dplyr::bind_rows()
+
+    path <- stringr::str_c(
+        "https://raw.githubusercontent.com/kelvins/",
+        "Municipios-Brasileiros/main/csv/municipios.csv"
+    )
+    tb_cities <- read.csv(path)
+    tb_cities <- tibble::as_tibble(tb_cities)
+    tb <- tb_cities %>%
+        dplyr::rename(cidade = nome) %>% 
+        dplyr::left_join(
+            tb_uf %>% 
+            dplyr::rename(uf = nome), 
+            by = c("codigo_uf" = "id")
+        ) %>% 
+        dplyr::select(cidade, uf, latitude, longitude)
+    return(tb)
+}
+
+#' @title Tempo e distancia entre cidades no Brasil
+#'
+#' @param x a data.frame com duas colunas, uma com o nome da cidade 
+#' e a outra com o do estado
+#' @param key a chave para fazer requisição na API do Google Maps
+#'
+#' @examples
+#' x <- get_cities()
+#' x <- x %>%
+#'     dplyr::filter(
+#'         uf == "Paraná" &
+#'             cidade %in% c("São Mateus do Sul", "Curitiba", 
+#'                           "União da Vitória", "Lapa")
+#'     )
+#' dist <- get_distance_matrix(x)
+#' dist
+#' 
+#' @export
+get_distance_matrix <- function(x, key = NULL) {
+    if (is.null(key)) key <- Sys.getenv("GMAPS")
+
+    # ===================================================================
+    # Constroi a tabela com todas combinações das cidades
+    # ===================================================================
+    dist_mun <- x %>%
+        dplyr::mutate(cidade_uf = stringr::str_c(cidade, "_", uf))
+    dist_mun_list <- combn(unique(dist_mun$cidade_uf), 2, simplify = FALSE)
+    dist_mun_list <- purrr::map(
+        dist_mun_list,
+         ~ tibble::tibble(cidade_orig = .x[1], cidade_dest = .x[2])
+        ) %>%
+        dplyr::bind_rows()
+    
+    dist_mun_list <- dist_mun_list %>%
+        dplyr::group_by(cidade_orig) %>%
+        dplyr::mutate(index = ceiling((1:dplyr::n()) / (dplyr::n() / 16))) %>%
+        dplyr::ungroup() %>% 
+        dplyr::group_by(cidade_orig, index) %>% 
+        dplyr::group_split()
+    
+    query <- stringr::str_c(
+        "https://maps.googleapis.com/maps/api/distancematrix/json?",
+        "key=${key}&",
+        "origins=${origin}&",
+        "destinations=${destination}"
+    )
+
+    # ===================================================================
+    # Coleta a distancia e a duração entre as cidades
+    # ===================================================================
+    i <- 1
+    dist_matrix <- tibble::tibble()
+    pb <- progress::progress_bar$new(
+        format = "[:bar] :current/:total (:percent) eta: :eta",
+        total = length(dist_mun_list)
+    )
+    pb$tick(i - 1)
+    for (i in i:length(dist_mun_list)) {
+        x <- dist_mun_list[[i]]
+
+        origin <- stringr::str_replace(unique(x$cidade_orig), "_", " ")
+        origin <- stringr::str_c(origin, "Brasil", sep = " ")
+        origin <- urltools::url_encode(origin)
+
+        destination <- stringr::str_replace(x$cidade_dest, "_", " ")
+        destination <- stringr::str_c(destination, "Brasil", sep = " ")
+        destination <- stringr::str_c(destination, collapse = "|")
+        destination <- urltools::url_encode(destination)
+
+        while(TRUE) {
+            result <- try(jsonlite::read_json(stringr::str_interp(query)), silent = TRUE)
+            if (!("try-error" %in% class(result))) break
+            message("Error, tentando novamente!")
+            Sys.sleep(1)
+        }
+
+        distance <- purrr::map(result[["rows"]][[1]][[1]], ~ tibble::as_tibble(.[["distance"]])) %>% 
+            dplyr::bind_rows()
+        names(distance) <- stringr::str_c("distance_", names(distance))
+        duration <- purrr::map(result[["rows"]][[1]][[1]], ~ tibble::as_tibble(.[["duration"]])) %>% 
+            dplyr::bind_rows()
+        names(duration) <- stringr::str_c("duration_", names(duration))
+
+        dist_matrix <- dist_matrix %>%
+            dplyr::bind_rows(
+                tibble::tibble(
+                    cidade_orig = x$cidade_orig,
+                    cidade_dest = x$cidade_dest,
+                    address_orig = purrr::simplify(result[["origin_addresses"]]),
+                    address_dest = purrr::simplify(result[["destination_addresses"]])
+                ) %>%
+                    dplyr::bind_cols(distance, duration)
+            )
+        Sys.sleep(0.4)
+        pb$tick(1)
+    }
+    return(dist_matrix)
+}
+```
+
+## Exemplo 1
+
+```{r, eval = FALSE}
+x <- get_cities()
+x <- x %>%
+    dplyr::filter(
+        uf == "Paraná" &
+            cidade %in% c(
+                "São Mateus do Sul", "Curitiba",
+                "União da Vitória", ""
+            )
+    )
+dist <- get_distance_matrix(x)
+dist
+```
+
+```{r, echo = FALSE}
+dist <- readRDS("data/codigos_exemplo_1.rds")
+dist %>%
+    kableExtra::kbl(
+        align = 'c',
+        booktabs = TRUE, 
+        col.names = stringr::str_replace(names(dist), "cidade_|address_|distance_|duration_", "")
+    ) %>%
+    kableExtra::kable_styling(full_width = FALSE, latex_options = c("striped", "hold_position", "scale_down")) %>%
+    kableExtra::column_spec(1:2, width = "12em") %>%
+    kableExtra::column_spec(3:4, width = "10em") %>%
+    kableExtra::column_spec(5:6, width = "4em") %>%
+    kableExtra::add_header_above(c("Cidade"=2,"Endereço"=2,"Distancia"=2, "Duração"=2))
+```
+
+## Exemplo 2
+
+```{r, eval = FALSE}
+x <- get_cities()
+x <- x %>%
+    dplyr::filter(cidade %in% c(
+        "Salvador", "São Paulo", "Bituruna", "Joinville"
+    ))
+dist <- get_distance_matrix(x)
+dist
+```
+
+
+```{r, echo = FALSE}
+dist <- readRDS("data/codigos_exemplo_2.rds")
+dist %>%
+    kableExtra::kbl(
+        align = 'c',
+        booktabs = TRUE, 
+        col.names = stringr::str_replace(names(dist), "cidade_|address_|distance_|duration_", "")
+    ) %>%
+    kableExtra::kable_styling(full_width = FALSE, latex_options = c("striped", "hold_position", "scale_down")) %>%
+    kableExtra::column_spec(1:2, width = "12em") %>%
+    kableExtra::column_spec(3:4, width = "10em") %>%
+    kableExtra::column_spec(5:6, width = "4em") %>%
+    kableExtra::add_header_above(c("Cidade"=2,"Endereço"=2,"Distancia"=2, "Duração"=2))
+```
+
+
+## Base de dados
+
+Tem-se ao todo 399 cidades no Paraná, é calculado então a distância de cada cidade com todas as demais, 
+totalizando ao todo 79401.
+
+```{r, eval = FALSE}
+x <- get_cities()
+x <- x %>%
+    dplyr::filter(uf == "Paraná")
+dist <- get_distance_matrix(x) # approx 3h
+
+distance_matrix <- dist %>%
+    dplyr::select(cidade_orig, cidade_dest, distance_value) %>%
+    dplyr::bind_rows(
+        dist %>%
+            dplyr::select(cidade_orig, cidade_dest, distance_value) %>%
+            dplyr::rename(cidade_dest = cidade_orig, cidade_orig = cidade_dest)
+    )
+
+distance_matrix <- distance_matrix %>%
+    dplyr::bind_rows(
+        tibble::tibble(
+            cidade_orig = unique(distance_matrix$cidade_orig),
+            cidade_dest = unique(distance_matrix$cidade_orig),
+            distance_value = Inf
+        )
+    )
+
+distance_matrix <- distance_matrix %>%
+    tidyr::spread(cidade_dest, distance_value)
+
+write.csv2(distance_matrix, "data/distance_matrix.csv", row.names = FALSE)
+
+duration_matrix <- dist %>%
+    dplyr::select(cidade_orig, cidade_dest, duration_value) %>%
+    dplyr::bind_rows(
+        dist %>%
+            dplyr::select(cidade_orig, cidade_dest, duration_value) %>%
+            dplyr::rename(cidade_dest = cidade_orig, cidade_orig = cidade_dest)
+    )
+
+duration_matrix <- duration_matrix %>%
+    dplyr::bind_rows(
+        tibble::tibble(
+            cidade_orig = unique(duration_matrix$cidade_orig),
+            cidade_dest = unique(duration_matrix$cidade_orig),
+            duration_value = Inf
+        )
+    )
+duration_matrix <- duration_matrix %>%
+    tidyr::spread(cidade_dest, duration_value)
+
+write.csv2(duration_matrix, "data/duration_matrix.csv", row.names = FALSE)
+
+cidade_id <- duration_matrix %>%
+    dplyr::select(cidade_orig) %>%
+    dplyr::mutate(id = 1:dplyr::n()) %>%
+    dplyr::rename(cidade = cidade_orig) %>%
+    dplyr::select(id, cidade) %>%
+    dplyr::mutate(cidade = stringr::str_replace(cidade, "_Paraná$", "")) %>% 
+    dplyr::left_join(x %>% dplyr::select(-uf) %>% dplyr::mutate(cidade = cidade), by = "cidade")
+
+write.csv2(cidade_id, "data/cidade_id.csv", row.names = FALSE)
+```

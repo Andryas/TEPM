@@ -1,0 +1,28 @@
+--- 
+title: "A Minimal Book Example"
+author: "Yihui Xie"
+date: "`r Sys.Date()`"
+site: bookdown::bookdown_site
+output: bookdown::gitbook
+bibliography: [book.bib]
+link-citations: yes
+tables: yes
+github-repo: rstudio/bookdown-demo
+description: "This is a minimal example of using the bookdown package to write a book. The output format for this example is bookdown::gitbook."
+---
+
+```{r, echo = FALSE}
+library(knitr)
+library(magrittr)
+
+opts_chunk$set(
+    message = FALSE,
+    warning = FALSE,
+    cache = TRUE,
+    echo = TRUE,
+    fig.align = "center"
+)
+```
+
+# Introdução
+
