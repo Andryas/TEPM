@@ -1,75 +1,59 @@
-// #ifndef pcv_naivy
-// #define pcv_naivy
+// [[depends(RcppEigen)]]
+// [[depends(RcppNumerical)]]
 
-#include <limits>
-#include <string>
-#include <cstring>
+#include <Rcpp.h>
 
-#include <algorithm>
-#include <iostream>
-#include <vector>
+using namespace Rcpp;
 
-#include <bits/stdc++.h>
-using namespace std;
-
-
-struct result
+//[[Rcpp::export]]
+DataFrame pcv_naivy(NumericMatrix x)
 {
-    string path;
-    double cost;
-};
+    // Vetor de inteiros para se referenciar a cada cidade
+    IntegerVector int_cidades = seq_len(x.ncol()) - 1;
+    CharacterVector char_cidades = as<CharacterVector>(int_cidades);
 
-void pcv_naivy(vector<int> C, int D)
-{
-    // 36, 95, 185, 354
-    vector<int> I{0, 1, 2, 3};
-    
-    vector<string> out_p;
-    vector<float> out_c;
+    // Garante que a primeira cidade é a origem
+    IntegerVector rotas = seq_len(x.ncol()) - 1;
+    rotas.erase(0);
 
-    vector<int> pi;
-    pi = I;
-    pi.erase(pi.begin());
+    NumericVector custo;
+    CharacterVector caminho;
 
     do
     {
-        int cost=D[0][pi[0]];
-        string orig = to_string(C[0]);
-        string dest = to_string(C[pi[0]]);
-        string path = orig + "->" + dest + ",";
-        for (int i = 0; i < (pi.size() - 1); i++)
+        IntegerVector index = rotas;
+        index.push_front(0);
+        index.push_back(0);
+
+        String it_caminho("0");
+        double it_custo = 0;
+
+        // cidades dentro do DO é a permutação da vez
+        for (int i = 0; i < (index.size() - 1); i++)
         {
-            string orig = to_string(C[pi[i]]);
-            string dest = to_string(C[pi[i+1]]);
-            path = path + orig + "->" + dest + ",";
+            double row = index[i];
+            double col = index[i + 1];
 
-            cost = cost + D[pi[i]][pi[i + 1]];
+            it_caminho += "-" + char_cidades[col];
+            it_custo = it_custo + x(row, col);
         }
-        path = path + to_string(C[pi[pi.back()]]) + "->" + to_string(C[0]);
-        cost = cost + D[pi[pi.back()]][0];
 
-        out_p.push_back(path);
-        out_c.push_back(cost);
+        caminho.push_back(it_caminho);
+        custo.push_back(it_custo);
 
-        // cout << cost << "\n";
-        // cout << path << "\n\n";
+    } while (std::next_permutation(rotas.begin(), rotas.end()));
 
-    } while (std::next_permutation(pi.begin(), pi.end()));
+    // Seleciona os caminho com menor custo
+    double menor_custo = min(custo);
+    LogicalVector menor_rota_logical = (custo == menor_custo);
+    IntegerVector menor_rota = seq_len(custo.length()) - 1;
+    // Vetor com as possíveis cidades com menor custo
+    menor_rota = menor_rota[menor_rota_logical];
 
-    int index = std::min_element(out_c.begin(), out_c.end()) - out_c.begin();
-
-    result output;
-    output.path = out_p[index];
-    output.cost = out_c[index];
-
-    // cout << "Custo: " << output.cost << " path: " << output.path << "\n\n";
-
-    return output;
+    DataFrame df = DataFrame::create(
+        Named("caminho") = caminho[menor_rota], 
+        Named("custo") = custo[menor_rota]);
+        
+    return df;
 }
 
-
-int main() {
-    int inf = std::numeric_limits<int>::infinity();
-    vector<int> C{36, 95, 185, 354};
-    int D[4][4] = {{inf, 351, 2765, 718}, {351, inf, 2546, 517}, {2765, 2546, inf, 1965}, {718, 517, 1965, inf}};
-}
