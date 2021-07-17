@@ -1,0 +1,352 @@
+---
+title: "Otimização do Modelo Poisson com Efeito Aleátorio"
+subtitle: "Implementação em R"
+author: "Andryas Waurzenczak & Dennis Leão"
+date: "`r as.character(Sys.Date())`"
+output:
+  html_document:
+    number_sections: true   
+    theme: readable
+    highlight: monochrome
+    fig_width: 11
+    fig_height: 9
+    fig_caption: true
+    df_print: paged
+---
+
+```{css, echo  = FALSE}
+#header {
+    text-align: center; 
+}
+```
+
+```{r, echo = FALSE, message = FALSE}
+library(knitr)
+
+opts_chunk$set(
+    message = FALSE,
+    warning = FALSE,
+    cache = TRUE,
+    echo = TRUE,
+    fig.align = "center"
+)
+```
+
+```{r libs}
+library(tidyverse)
+library(microbenchmark)
+```
+
+
+# Resultados
+
+```{r, echo = FALSE}
+result <- readRDS("benchmark.rds")
+result %>%
+  dplyr::mutate(
+    time = microbenchmark:::convert_to_unit(time, unit = "s"),
+    n = factor(n, levels = c("1k", "10k", "100k", "1kk"))
+  ) %>%
+  dplyr::group_by(n, lang) %>%
+    dplyr::summarise(
+      avg = mean(time),
+      sd = sd(time)
+    ) %>%
+    ggplot(aes(x = n, y = avg, group = lang, color = lang)) +
+    geom_point() +
+    geom_errorbar(aes(ymin = avg - 3 * sd, ymax = avg + 3 * sd)) +
+    theme_minimal() +
+    labs(x = "Tamanho da amostra (n)", y = "Média em segundos") +
+    scale_color_manual(values = c("blue", "red")) +
+    theme(legend.title = element_blank())
+```
+
+# Código Original
+
+```{r}
+profvis::profvis({
+  ## Fixando valores do parâmetros
+  sigma2 <- 0.5
+  beta0 <- log(10)
+
+  # Tamanho da amostra
+  set.seed(123)
+  n <- 1000
+
+  ## Simular o efeito aleatório b_i
+  bi <- rnorm(n = n, mean = 0, sd = sqrt(sigma2))
+  # bi
+
+  ## Preditor linear
+  lambdai <- exp(beta0 + bi)
+
+  ## Simulando os dados Yi's
+  yi <- rpois(n = n, lambda = lambdai)
+  # hist(yi)
+
+  ## FIM DA PARTE DE SIMULAÇÃO ---------------------------------------------------
+  integrando <- function(bi, beta0, sigma2, y) {
+    lambda <- exp(beta0 + bi)
+    out <- dpois(y, lambda = lambda) * dnorm(bi, mean = 0, sd = sqrt(sigma2))
+    return(out)
+  }
+
+  # ## Gráfico do integrando
+  # b <- seq(-3, 3, l = 100)
+  # plot(integrando(bi = b, beta0 = log(10), sigma2 = 0.5, y = yi[1]) ~ b, type = "l")
+  # for (i in 2:100) {
+  #   lines(b, integrando(bi = b, beta0 = log(10), sigma2 = 0.5, y = yi[i]))
+  # }
+
+  ## Resolvendo a integral
+  integral <- c()
+  for (i in 1:n) {
+    integral[i] <- integrate(
+      f = integrando,
+      lower = -Inf,
+      upper = Inf,
+      beta0 = beta0,
+      sigma2 = sigma2, 
+      y = yi[i]
+    )$value
+  }
+
+  ll <- sum(log(integral))
+  # ll
+
+  ## Criando uma função: log-verossimilhança
+  my_ll <- function(par, y) {
+    integral <- c()
+    for (i in 1:length(y)) {
+      integral[i] <- integrate(
+        f = integrando,
+        lower = -Inf,
+        upper = Inf,
+        beta0 = par[1],
+        sigma2 = exp(par[2]), 
+        y = y[i]
+      )$value
+    }
+    # print(c(round(par, 2)))
+    ll <- sum(log(integral))
+    return(-ll)
+  }
+
+  my_ll(par = c(beta0, log(sigma2)), y = yi)
+
+  invisible(capture.output(temp <- optim(
+    par = c(log(8), log(0.3)),
+    fn = my_ll,
+    y = yi,
+    method = "Nelder-Mead"
+  )))
+  # temp
+
+  invisible(capture.output(temp2 <- optim(
+    par = c(log(8), log(0.3)), fn = my_ll, y = yi,
+    method = "BFGS"
+  )))
+  # temp2
+})
+```
+
+Pelo resultado obtido pelo `profvis` acima, identifica-se dois pontos
+principais de melhoria, o primerio na linha 25 e o segundo na linha 52,
+que são respectivamente:
+
+```{r, eval = FALSE, echo = TRUE}
+out <- dpois(y, lambda = lambda) * dnorm(bi, mean = 0, sd = sqrt(sigma2))
+```
+
+e
+
+```{r, eval = FALSE, echo = TRUE}
+integrate(
+  f = integrando, 
+  lower = -Inf, 
+  upper = Inf,
+  beta0 = par[1], 
+  sigma2 = exp(par[2]), 
+  y = y[i]
+)$value
+```
+
+Basicamente o que está tendo um tempo extra de processamento é a função `integrando`.
+
+# Otimização em C++
+
+As funções `integrando` e `my_ll` foram reimplementadas em C++, abaixo tem-se
+o `profvis` da nova implementação.
+
+```{cpp, eval = FALSE}
+// [[Rcpp::depends(RcppEigen)]]
+// [[Rcpp::depends(RcppNumerical)]]
+
+#include <RcppNumerical.h>
+
+using namespace Numer;
+
+class myfun : public Func
+{
+private:
+    const double beta0;
+    const double sigma2;
+    double y;
+
+public:
+    myfun(const double beta0_, const double sigma2_, double y_) : beta0(beta0_), 
+    sigma2(sigma2_), y(y_) {}
+
+    double operator()(const double &x) const
+    {
+        return R::dpois(y, std::exp(beta0 + x), 0) * R::dnorm(x, 0, std::sqrt(sigma2), 0);
+    }
+};
+
+// [[Rcpp::export]]
+Rcpp::NumericVector integrate_poisson(
+    Rcpp::NumericVector y,
+    const double beta0,
+    const double sigma2)
+{
+    const double lower = R_NegInf, upper = R_PosInf;
+    double err_est;
+    int err_code;
+
+    for (int i = 0; i <= y.length(); i++)
+    {
+        myfun f(beta0, sigma2, y[i]);
+        const double res = integrate(f, lower, upper, err_est, err_code);
+        y[i] = res;
+    }
+    return (y);
+}
+
+// [[Rcpp::export]]
+double log_integrate_poisson(
+    Rcpp::NumericVector par,
+    Rcpp::NumericVector y)
+{
+    const double beta0 = par[0];
+    const double sigma2 = std::exp(par[1]);
+    Rcpp::NumericVector ll = integrate_poisson(y, beta0, sigma2);
+    ll = Rcpp::log(ll);
+    double res = Rcpp::sum(ll);
+
+    return res * -1;
+}
+```
+
+Compila o código.
+
+```{r, message=FALSE, eval = FALSE}
+Rcpp::sourceCpp("integral.cpp")
+```
+
+```{r, eval = FALSE}
+integral <- integrate_poisson(yi, beta0, sigma2)
+l <- sum(log(integral))
+
+invisible(capture.output(temp <- optim(
+  par = c(log(8), log(0.3)),
+  fn = log_integrate_poisson,
+  y = yi,
+  method = "Nelder-Mead"
+)))
+
+invisible(capture.output(temp2 <- optim(
+  par = c(log(8), log(0.3)),
+  fn = log_integrate_poisson,
+  y = yi,
+  method = "BFGS"
+)))
+```
+
+# Microbenchmark
+
+Para efeitos de comparação varia-se o tamanho da amostra (n) e compara-se o
+tempo de processamento da função `my_ll` com sua respectiva implementaççao em
+C++ `log_integrate_poisson`.
+
+```{r, echo = FALSE}
+result <- readRDS("benchmark.rds")
+```
+
+```{r, eval = FALSE}
+# ============================================================================ #
+#                                  PARAMETROS                                  #
+# ============================================================================ #
+sigma2 <- 0.5
+beta0 <- log(10)
+
+simula_dados <- function(n, sigma2, beta0) {
+    bi <- rnorm(n = n, mean = 0, sd = sqrt(sigma2))
+    lambdai <- exp(beta0 + bi)
+    yi <- rpois(n = n, lambda = lambdai)
+    return(yi)
+}
+
+n1k <- simula_dados(1000, sigma2, beta0)
+n10k <- simula_dados(10000, sigma2, beta0)
+n100k <- simula_dados(100000, sigma2, beta0)
+n1kk <- simula_dados(1000000, sigma2, beta0)
+
+n1k <- microbenchmark(
+  my_ll(c(beta0, log(sigma2)), n1k),
+  log_integrate_poisson(c(beta0, log(sigma2)), n1k)
+)
+n1k <- dplyr::as_tibble(n1k)
+n1k$n <- "1k"
+
+n10k <- microbenchmark(
+  my_ll(c(beta0, log(sigma2)), n10k),
+  log_integrate_poisson(c(beta0, log(sigma2)), n10k)
+)
+n10k <- dplyr::as_tibble(n10k)
+n10k$n <- "10k"
+
+n100k <- microbenchmark(
+  my_ll(c(beta0, log(sigma2)), n100k),
+  log_integrate_poisson(c(beta0, log(sigma2)), n100k)
+)
+n100k <- dplyr::as_tibble(n100k)
+n100k$n <- "100k"
+
+n1kk <- microbenchmark(
+  my_ll(c(beta0, log(sigma2)), n1kk),
+  log_integrate_poisson(c(beta0, log(sigma2)), n1kk)
+)
+n1kk <- dplyr::as_tibble(n1kk)
+n1kk$n <- "1kk"
+
+result <- n1k %>%
+  dplyr::bind_rows(n10k, n100k, n1kk)
+
+result$lang <- stringr::str_extract(result$expr, "^\\w+(?=\\()")
+result$lang <- ifelse(result$lang == "log_integrate_poisson", "C", "R")
+
+result %>%
+  dplyr::mutate(
+    time = microbenchmark:::convert_to_unit(time, unit = "s"),
+    n = factor(n, levels = c('1k', '10k', '100k', '1kk'))
+  ) %>% 
+  dplyr::group_by(n, lang) %>%
+  dplyr::summarise(
+    avg = mean(time),
+    sd = sd(time)
+  )
+```
+
+```{r, echo = FALSE}
+# saveRDS(result, "benchmark.rds")
+result %>%
+  dplyr::mutate(
+    time = microbenchmark:::convert_to_unit(time, unit = "s"),
+    n = factor(n, levels = c("1k", "10k", "100k", "1kk"))
+  ) %>%
+  dplyr::group_by(n, lang) %>%
+  dplyr::summarise(
+    avg = mean(time),
+    sd = sd(time)
+  )
+```

@@ -1,1 +1,15 @@
 # Considerações Finais
+
+Pelos resultados obtidos no gráfico que avalia o tempo de execução das duas
+abordagens do PCV observa-se que a forma mais ingênua de implementação tem uma
+performace muito pior do que a abordagem heurística do vizinhos mais próximos.
+Com 10 cidades o método exato ingênuo se torna praticamente inviável enquanto
+que para a abordagem dos vizinho mais próximo o incremento de uma nova cidade
+aumenta pouco no tempo de execução final do algoritmo, crescendo,
+aparentemente, de forma linear.
+
+Já os resultados do segundo gráfico mostram a qualidade final do algoritmo,
+sendo que o método exato vai trazer a melhor rota obrigatoriamente, para os
+valores de **n** que foi possível calcular, observa-se que o algoritmo do
+vizinho mais próximo superestimou  na maioria das vezes (3 de 4) o custo
+final.

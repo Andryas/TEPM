@@ -5,11 +5,9 @@ A função **get_cities** coleta todas as cidades e seus respectivos estados do 
 A função **get_distance_matrix** faz todas as combinações dois à dois e calcula a distância e
 a duração do percurso atráves da API do Google Maps. 
 
-colocar os pacotes necessários aqui....
-
 Abaixo tem-se os códigos e em seguida alguns exemplos práticos.
 
-```{r, eval = FALSE}
+```{r, eval = FALSE, echo = TRUE}
 #' @title Todos munícipios do Brasil
 #' 
 #' Esta função coleta todos os munícipios e seus respectivos estados no Brasil
@@ -155,7 +153,7 @@ get_distance_matrix <- function(x, key = NULL) {
 
 ## Exemplo 1
 
-```{r, eval = FALSE}
+```{r, eval = FALSE, echo = TRUE}
 x <- get_cities()
 x <- x %>%
     dplyr::filter(
@@ -170,14 +168,14 @@ dist
 ```
 
 ```{r, echo = FALSE}
-dist <- readRDS("data/codigos_exemplo_1.rds")
+dist <- readRDS("cpp/data/codigos_exemplo_1.rds")
 dist %>%
     kableExtra::kbl(
         align = 'c',
         booktabs = TRUE, 
         col.names = stringr::str_replace(names(dist), "cidade_|address_|distance_|duration_", "")
     ) %>%
-    kableExtra::kable_styling(full_width = FALSE, latex_options = c("striped", "hold_position", "scale_down")) %>%
+    kableExtra::kable_styling(full_width = FALSE, latex_options = c("striped", "HOLD_position", "scale_down")) %>%
     kableExtra::column_spec(1:2, width = "12em") %>%
     kableExtra::column_spec(3:4, width = "10em") %>%
     kableExtra::column_spec(5:6, width = "4em") %>%
@@ -186,7 +184,7 @@ dist %>%
 
 ## Exemplo 2
 
-```{r, eval = FALSE}
+```{r, eval = FALSE, echo = TRUE}
 x <- get_cities()
 x <- x %>%
     dplyr::filter(cidade %in% c(
@@ -198,14 +196,14 @@ dist
 
 
 ```{r, echo = FALSE}
-dist <- readRDS("data/codigos_exemplo_2.rds")
+dist <- readRDS("cpp/data/codigos_exemplo_2.rds")
 dist %>%
     kableExtra::kbl(
         align = 'c',
         booktabs = TRUE, 
         col.names = stringr::str_replace(names(dist), "cidade_|address_|distance_|duration_", "")
     ) %>%
-    kableExtra::kable_styling(full_width = FALSE, latex_options = c("striped", "hold_position", "scale_down")) %>%
+    kableExtra::kable_styling(full_width = FALSE, latex_options = c("striped", "HOLD_position", "scale_down")) %>%
     kableExtra::column_spec(1:2, width = "12em") %>%
     kableExtra::column_spec(3:4, width = "10em") %>%
     kableExtra::column_spec(5:6, width = "4em") %>%
@@ -244,7 +242,7 @@ distance_matrix <- distance_matrix %>%
 distance_matrix <- distance_matrix %>%
     tidyr::spread(cidade_dest, distance_value)
 
-write.csv2(distance_matrix, "data/distance_matrix.csv", row.names = FALSE)
+write.csv2(distance_matrix, "cpp/data/distance_matrix.csv", row.names = FALSE)
 
 duration_matrix <- dist %>%
     dplyr::select(cidade_orig, cidade_dest, duration_value) %>%
@@ -265,7 +263,7 @@ duration_matrix <- duration_matrix %>%
 duration_matrix <- duration_matrix %>%
     tidyr::spread(cidade_dest, duration_value)
 
-write.csv2(duration_matrix, "data/duration_matrix.csv", row.names = FALSE)
+write.csv2(duration_matrix, "cpp/data/duration_matrix.csv", row.names = FALSE)
 
 cidade_id <- duration_matrix %>%
     dplyr::select(cidade_orig) %>%
@@ -275,5 +273,5 @@ cidade_id <- duration_matrix %>%
     dplyr::mutate(cidade = stringr::str_replace(cidade, "_Paraná$", "")) %>% 
     dplyr::left_join(x %>% dplyr::select(-uf) %>% dplyr::mutate(cidade = cidade), by = "cidade")
 
-write.csv2(cidade_id, "data/cidade_id.csv", row.names = FALSE)
+write.csv2(cidade_id, "cpp/data/cidade_id.csv", row.names = FALSE)
 ```

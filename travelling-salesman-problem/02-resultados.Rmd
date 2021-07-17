@@ -1,1 +1,139 @@
 # Resultado
+
+Para ilustrar a implementação computacional das diferentes formulações do
+Problema do Caixeiro-Viajante os dados de distância entre as cidades do Paraná
+foram coletados.
+
+```{r}
+# parana <- read_municipality(code_muni = "PR", year = 2010)
+# saveRDS(parana, "cpp/data/parana.rds")
+parana <- readRDS("cpp/data/parana.rds")
+ggplot() +
+    geom_sf(data = parana, fill = "#2D3E50", color = "#FEBF57", size = .15, show.legend = FALSE) +
+    labs(subtitle = "As 399 cidades do Paraná", size = 8) +
+    theme_minimal()
+```
+
+As informações de coordenadas geográficas e distancia entre as cidades foram
+todas coletadas via API do [Google Maps](https://developers.google.com/maps).
+Os scripts feitos para obtenção dos dados e os próprios dados estão
+disponíveis no seguinte repositório.
+
+A matriz de distância das cidades do Paraná é simetrica, ou seja, a distância
+entre a cidade de São Mateus do Sul para Curitiba é a mesma que de Curitiba
+para São Mateus do Sul, tornando a performance dos algoritmos mais rápida caso
+a matriz não fosse simetrica.
+
+```{r, eval = FALSE}
+sourceCpp("cpp/pcv_naivy.cpp")
+sourceCpp("cpp/pcv_nearest_neighbor.cpp")
+
+data <- read_csv2("cpp/data/distance_matrix.csv")
+dist_m <- data %>%
+    column_to_rownames("cidade_orig") %>%
+    as.matrix()
+n <- 6:9
+set.seed(10)
+cities_samples <- map(n, function(x) {sample(1:399, x)})
+
+# tictoc::tic()
+result <- map(cities_samples, function(x) {
+    distx <- dist_m[x, x]
+
+    naivy <- pcv_naivy(distx)
+    naivy$fun <- "pcv_naivy"
+    nn <- pcv_nearest_neighbor(distx)
+    nn$fun <- "pcv_nearest_neighbor"
+
+    naivy %>% 
+        bind_rows(nn) %>% 
+        mutate(n = length(x))
+})
+# tictoc::toc()
+result <- result %>%
+    bind_rows() %>% 
+    distinct(custo, fun, .keep_all = TRUE)
+
+time <- map(cities_samples, function(x) {
+    distx <- dist_m[x, x]
+
+    result <- microbenchmark(
+        pcv_naivy(distx),
+        pcv_nearest_neighbor(distx),
+        times = 10,
+        unit = "ms"
+    )
+    
+    result <- as_tibble(result)
+    result$n <- length(x)
+
+    result
+})
+time <- time %>% 
+    bind_rows()
+time$fun <- str_extract(time$expr, "^\\w+(?=\\()")
+time_summary <- time %>%
+  mutate(time = microbenchmark:::convert_to_unit(time, unit = "ms")) %>% 
+  group_by(n, fun) %>%
+  summarise(
+    avg = mean(time),
+    sd = sd(time)
+  )
+
+set.seed(10)
+n <- 10:50
+cities_samples2 <- map(n, function(x) {
+    sample(1:399, x)
+})
+time2 <- map(cities_samples2, function(x) {
+    distx <- dist_m[x, x]
+
+    result <- microbenchmark(
+        pcv_nearest_neighbor(distx),
+        times = 10,
+        unit = "ms"
+    )
+
+    result <- as_tibble(result)
+    result$n <- length(x)
+
+    result
+})
+time2 <- time2 %>%
+    bind_rows()
+time2$fun <- str_extract(time2$expr, "^\\w+(?=\\()")
+time_summary2 <- time2 %>%
+    mutate(time = microbenchmark:::convert_to_unit(time, unit = "ms")) %>%
+    group_by(n, fun) %>%
+    summarise(
+        avg = mean(time),
+        sd = sd(time)
+    )
+
+time_summary_final <- time_summary %>%
+    bind_rows(time_summary2)
+```
+
+```{r,fig.cap="Comparação do tempo de execução das duas implementações do PCV", fig.pos="h"}
+time_summary_final %>%
+    ggplot(aes(x = n, y = avg, group = fun, color = fun)) +
+    geom_point() +
+    geom_line() +
+    facet_wrap(~fun, scales = "free_y") +
+    theme_minimal() +
+    labs(y = "Média de 10 repetições (Milissegundo)", x = "Quantidade de cidades avaliadas na rota") +
+    theme(legend.title = element_blank())
+```
+
+```{r, fig.cap="Comparação do custo das duas implementações do PCV", fig.pos="h"}
+result %>%
+    ggplot(aes(x = n, y = custo, color = fun, group = fun)) +
+    geom_point() +
+    geom_line() +
+    theme_minimal() +
+    theme(legend.title = element_blank()) +
+    labs(x = "Quantidade de cidades avaliadas na rota", y = "Custo")
+```
+
+
+\newpage

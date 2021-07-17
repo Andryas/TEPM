@@ -1,28 +1,73 @@
 --- 
-title: "A Minimal Book Example"
-author: "Yihui Xie"
+title: "Problema do Caixeiro Viajante"
+subtitle: "Implementação Computacional em C++"
+author: "Andryas Waurzenczak"
 date: "`r Sys.Date()`"
-site: bookdown::bookdown_site
 output: bookdown::gitbook
 bibliography: [book.bib]
 link-citations: yes
 tables: yes
-github-repo: rstudio/bookdown-demo
-description: "This is a minimal example of using the bookdown package to write a book. The output format for this example is bookdown::gitbook."
 ---
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, message=FALSE}
 library(knitr)
 library(magrittr)
+
+library(microbenchmark)
+suppressMessages(library(tidyverse))
+library(geobr)
+library(Rcpp)
 
 opts_chunk$set(
     message = FALSE,
     warning = FALSE,
     cache = TRUE,
-    echo = TRUE,
+    echo = FALSE,
     fig.align = "center"
 )
+
+load(".RData")
 ```
+
 
 # Introdução
 
+O Problema do Caixeiro Viajante (PCV) é um problema que tenta determinar a
+menor rota para percorrer uma série de cidades (visitando uma única vez cada
+uma delas), retornando à cidade de origem. Ele é um problema de otimização
+NP-difícil inspirado na necessidade dos vendedores em realizar entregas em
+diversos locais (as cidades) percorrendo o menor caminho possível, reduzindo o
+tempo necessário para a viagem e os possíveis custos com transporte e
+combustível.
+
+Um fato interessante sobre o Problema do Caixeiro Viajante é que ninguém sabe
+com precisão onde e quando se originou, e mesmo assim é um dos problemas mais
+interessantes e debatidos no mundo principalmente com alunos dos cursos de
+computação que estão aprendendo a programar. 
+
+As principais abordagens referentes ao Problema do Caixeiro Viajante podem ser
+dividas, em pelo menos, duas grandes áreas: Métodos Exatos e Métodos
+Heurísticos.
+
+Os métodos exatos como o próprio nome sugere encontram o caminho com a menor 
+distância, porém em geral tendem a ter uma performance mais demorada dado
+que sua busca pela melhor rota é mais exaustiva.
+
+Já os métodos heurísticos são utilizados para obter rapidamente uma solução para um
+problema, mesmo que não seja a melhor solução. Esses métodos são comumente
+usados quando os métodos exatos são inviáveis. 
+
+O propósito deste trabalho é análisar duas implementações diferentes do PCV.
+Para fins apenas de curiosidade  foi coletado as distâncias de todas as
+cidades do Paraná 2 á 2 para analisar a performance de cada uma das
+implementações computacionais do PCV. 
+
+A primeira abordagem é a implementação exata do PCV e é dita naïve, um método
+exato em que busca calcular todas as possíveis rotas e seleciona a com menor
+distância. A segunda implementação é um método heurístico que busca encontrar 
+a melhor rota percorrendo as cidades com menor distância do ponto em que se 
+encontra.
+
+Na próxima seção tem-se a definição formal de cada método, depois
+tem-se a implementação computacional seguida dos resultados, onde é feito 
+um benchmark.
